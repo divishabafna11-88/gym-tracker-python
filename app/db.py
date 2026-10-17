@@ -6,7 +6,7 @@ from psycopg.rows import dict_row
 
 
 def url():
-    return os.environ.get("DATABASE_URL", "")
+    return os.environ.get("DATABASE_URL") or "postgresql://postgres:postgres@localhost:5432/gym"
 
 
 def connect():
