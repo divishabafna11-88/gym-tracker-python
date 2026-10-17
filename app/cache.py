@@ -10,7 +10,8 @@ _client = None
 def client():
     global _client
     if _client is None:
-        _client = redis.Redis.from_url(os.environ.get("REDIS_URL", ""), decode_responses=True)
+        url = os.environ.get("REDIS_URL") or "redis://localhost:6379/0"
+        _client = redis.Redis.from_url(url, decode_responses=True)
     return _client
 
 

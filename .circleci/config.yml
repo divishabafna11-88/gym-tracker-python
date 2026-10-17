@@ -1,0 +1,155 @@
+version: 2.1
+
+executors:
+  python-env:
+    docker:
+      - image: cimg/python:3.12
+  docker-builder:
+    docker:
+      - image: cimg/base:current
+
+jobs:
+  secret-scan:
+    docker:
+      - image: zricethezav/gitleaks:latest
+    steps:
+      - checkout
+      - run:
+          name: Run Secret Scanning with Gitleaks
+          command: |
+            gitleaks detect --source . --verbose --no-git
+
+  lint:
+    executor: python-env
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff Linter
+          command: pip install ruff
+      - run:
+          name: Run Lint Checks
+          command: ruff check .
+
+  unit-tests:
+    executor: python-env
+    steps:
+      - checkout
+      - run:
+          name: Install Dependencies
+          command: |
+            pip install -r requirements.txt
+            pip install pytest pytest-cov
+      - run:
+          name: Run Unit Tests with Coverage
+          command: |
+            pytest tests/test_strength.py --cov=app.strength --cov-report=term-missing --cov-fail-under=70
+
+  integration-tests:
+    docker:
+      - image: cimg/python:3.12
+        environment:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gym
+          REDIS_URL: redis://localhost:6379/0
+      - image: cimg/postgres:16.2
+        environment:
+          POSTGRES_DB: gym
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+      - image: cimg/redis:7.2
+    steps:
+      - checkout
+      - run:
+          name: Install PostgreSQL Client and Python Test Packages
+          command: |
+            sudo apt-get update && sudo apt-get install -y postgresql-client
+            pip install -r requirements.txt
+            pip install pytest httpx
+      - run:
+          name: Wait for Services and Apply Migrations
+          command: |
+            dockerize -wait tcp://localhost:5432 -wait tcp://localhost:6379 -timeout 1m
+            PGPASSWORD=postgres psql -h localhost -U postgres -d gym -f migrations/001_schema.sql
+            PGPASSWORD=postgres psql -h localhost -U postgres -d gym -f migrations/002_seed.sql
+      - run:
+          name: Run Integration Tests
+          command: |
+            pytest tests/test_integration.py
+
+  build-and-push:
+    executor: docker-builder
+    parameters:
+      moving_tag:
+        type: string
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: default
+      - run:
+          name: Build and Push Docker Images
+          command: |
+            SHORT_SHA=$(echo $CIRCLE_SHA1 | cut -c1-7)
+            BRANCH_TAG="<< parameters.moving_tag >>"
+            IMMUTABLE_TAG="${CIRCLE_BRANCH}-${SHORT_SHA}"
+            IMAGE_REPO="${DOCKERHUB_USER}/gym-tracker-python"
+
+            echo "Target Moving Tag: ${IMAGE_REPO}:${BRANCH_TAG}"
+            echo "Target Immutable Tag: ${IMAGE_REPO}:${IMMUTABLE_TAG}"
+
+            docker build -t ${IMAGE_REPO}:${BRANCH_TAG} -t ${IMAGE_REPO}:${IMMUTABLE_TAG} .
+
+            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USER" --password-stdin
+
+            docker push ${IMAGE_REPO}:${BRANCH_TAG}
+            docker push ${IMAGE_REPO}:${IMMUTABLE_TAG}
+
+workflows:
+  qa_pipeline:
+    jobs:
+      - secret-scan:
+          filters:
+            branches:
+              only: main
+      - lint:
+          requires:
+            - secret-scan
+          filters:
+            branches:
+              only: main
+      - unit-tests:
+          requires:
+            - lint
+          filters:
+            branches:
+              only: main
+      - integration-tests:
+          requires:
+            - unit-tests
+          filters:
+            branches:
+              only: main
+      - build-and-push:
+          name: build-and-push-qa
+          moving_tag: qa
+          requires:
+            - integration-tests
+          filters:
+            branches:
+              only: main
+
+  staging_pipeline:
+    jobs:
+      - build-and-push:
+          name: build-and-push-stage
+          moving_tag: stage
+          filters:
+            branches:
+              only: staging
+
+  prod_pipeline:
+    jobs:
+      - build-and-push:
+          name: build-and-push-prod
+          moving_tag: prod
+          filters:
+            branches:
+              only: prod
