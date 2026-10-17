@@ -1,0 +1,269 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: qa
+data:
+  001_schema.sql: |
+    CREATE TABLE IF NOT EXISTS exercises (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'general');
+    CREATE UNIQUE INDEX IF NOT EXISTS exercises_name ON exercises (lower(name));
+
+    CREATE TABLE IF NOT EXISTS lifts (
+        id SERIAL PRIMARY KEY,
+        user_name TEXT NOT NULL,
+        exercise_id INT NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+        weight NUMERIC(6,2) NOT NULL CHECK (weight > 0),
+        reps INT NOT NULL CHECK (reps >= 1),
+        notes TEXT NOT NULL DEFAULT '',
+        performed_at TIMESTAMPTZ NOT NULL DEFAULT now());
+
+    CREATE INDEX IF NOT EXISTS lifts_user_ex ON lifts (user_name, exercise_id, performed_at);
+  002_seed.sql: |
+    INSERT INTO exercises (id, name, category) VALUES
+     (1, 'Bench Press', 'push'),
+     (2, 'Back Squat', 'legs'),
+     (3, 'Deadlift', 'hinge'),
+     (4, 'Overhead Press', 'push'),
+     (5, 'Barbell Row', 'pull'),
+     (6, 'Front Squat', 'legs')
+    ON CONFLICT DO NOTHING;
+    SELECT setval('exercises_id_seq', GREATEST((SELECT MAX(id) FROM exercises), 1));
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: qa
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_DB
+              value: "gym"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres"
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "gym"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: postgres-init-scripts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: qa
+  labels:
+    app: postgres
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app: postgres
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: stage
+data:
+  001_schema.sql: |
+    CREATE TABLE IF NOT EXISTS exercises (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'general');
+    CREATE UNIQUE INDEX IF NOT EXISTS exercises_name ON exercises (lower(name));
+
+    CREATE TABLE IF NOT EXISTS lifts (
+        id SERIAL PRIMARY KEY,
+        user_name TEXT NOT NULL,
+        exercise_id INT NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+        weight NUMERIC(6,2) NOT NULL CHECK (weight > 0),
+        reps INT NOT NULL CHECK (reps >= 1),
+        notes TEXT NOT NULL DEFAULT '',
+        performed_at TIMESTAMPTZ NOT NULL DEFAULT now());
+
+    CREATE INDEX IF NOT EXISTS lifts_user_ex ON lifts (user_name, exercise_id, performed_at);
+  002_seed.sql: |
+    INSERT INTO exercises (id, name, category) VALUES
+     (1, 'Bench Press', 'push'),
+     (2, 'Back Squat', 'legs'),
+     (3, 'Deadlift', 'hinge'),
+     (4, 'Overhead Press', 'push'),
+     (5, 'Barbell Row', 'pull'),
+     (6, 'Front Squat', 'legs')
+    ON CONFLICT DO NOTHING;
+    SELECT setval('exercises_id_seq', GREATEST((SELECT MAX(id) FROM exercises), 1));
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: stage
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_DB
+              value: "gym"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres"
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "gym"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: postgres-init-scripts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: stage
+  labels:
+    app: postgres
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app: postgres
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: prod
+data:
+  001_schema.sql: |
+    CREATE TABLE IF NOT EXISTS exercises (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'general');
+    CREATE UNIQUE INDEX IF NOT EXISTS exercises_name ON exercises (lower(name));
+
+    CREATE TABLE IF NOT EXISTS lifts (
+        id SERIAL PRIMARY KEY,
+        user_name TEXT NOT NULL,
+        exercise_id INT NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+        weight NUMERIC(6,2) NOT NULL CHECK (weight > 0),
+        reps INT NOT NULL CHECK (reps >= 1),
+        notes TEXT NOT NULL DEFAULT '',
+        performed_at TIMESTAMPTZ NOT NULL DEFAULT now());
+
+    CREATE INDEX IF NOT EXISTS lifts_user_ex ON lifts (user_name, exercise_id, performed_at);
+  002_seed.sql: |
+    INSERT INTO exercises (id, name, category) VALUES
+     (1, 'Bench Press', 'push'),
+     (2, 'Back Squat', 'legs'),
+     (3, 'Deadlift', 'hinge'),
+     (4, 'Overhead Press', 'push'),
+     (5, 'Barbell Row', 'pull'),
+     (6, 'Front Squat', 'legs')
+    ON CONFLICT DO NOTHING;
+    SELECT setval('exercises_id_seq', GREATEST((SELECT MAX(id) FROM exercises), 1));
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: prod
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_DB
+              value: "gym"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres"
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "gym"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: postgres-init-scripts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: prod
+  labels:
+    app: postgres
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app: postgres

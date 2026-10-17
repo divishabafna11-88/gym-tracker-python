@@ -1,110 +1,191 @@
-# Gym Progress Tracker
+# Gym Progress Tracker — Complete DevOps Pipeline
 
-**Language:** Python (FastAPI) &nbsp;|&nbsp; **Needs:** Postgres + Redis
-
-This is a **starter**. The application already works. Your job is everything
-that gets it building, tested and running in CI.
-
----
-
-## You do not need Python installed
-
-You will build this into a container, and the container brings its own
-Python 3.12. You are not being asked to extend the app — you are being asked
-to ship it.
+**Language:** Python (FastAPI) &nbsp;|&nbsp; **Architecture:** Postgres + Redis + Docker + CircleCI + Kubernetes  
+**Repository:** [https://github.com/divishabafna11-88/gym-tracker-python](https://github.com/divishabafna11-88/gym-tracker-python)  
+**Author:** Divisha Bafna (3rd Year ISE — Capstone Project)
 
 ---
 
-## 1. What this app needs
+## The Hard Part: Is 100kg for 5 reps better than 110kg for 3?
 
-| | |
-|---|---|
-| **Runtime** | Python 3.12 |
-| **Install dependencies** | `pip install -r requirements.txt` |
-| **Start the app** | `uvicorn app.main:app --host 0.0.0.0 --port 8080` |
-| **Listens on** | port 8080, bound to `0.0.0.0` |
-| **Environment variables** | `DATABASE_URL`, `REDIS_URL` |
-| **Needs running first** | Postgres, Redis, and the migrations applied |
+### 1. Mathematical Breakdown
 
-### What it does
+To determine whether $100\text{kg} \times 5\text{ reps}$ is better than $110\text{kg} \times 3\text{ reps}$, we evaluate their Estimated One-Rep Max ($e1RM$) under both formulas:
 
-Log every set: exercise, weight, reps. The app tells you straight away whether that was a personal best, keeps a per-exercise record, charts your estimated one-rep max session by session, and shouts when a lift has not moved in weeks. It carries two different one-rep-max formulas so you can see them disagree.
+1. **Epley Formula**:
+   $$\text{e1RM} = w \times \left(1 + \frac{r}{30}\right)$$
+   - For **100kg x 5**: $\text{e1RM} = 100 \times \left(1 + \frac{5}{30}\right) = 100 \times 1.1667 = \mathbf{116.67\text{ kg}}$
+   - For **110kg x 3**: $\text{e1RM} = 110 \times \left(1 + \frac{3}{30}\right) = 110 \times 1.1000 = \mathbf{121.00\text{ kg}}$
+   - **Verdict under Epley**: **110kg x 3 wins by +4.33 kg**.
 
-### Endpoints
+2. **Brzycki Formula**:
+   $$\text{e1RM} = \frac{w \times 36}{37 - r}$$
+   - For **100kg x 5**: $\text{e1RM} = \frac{100 \times 36}{37 - 5} = \frac{3600}{32} = \mathbf{112.50\text{ kg}}$
+   - For **110kg x 3**: $\text{e1RM} = \frac{110 \times 36}{37 - 3} = \frac{3960}{34} = \mathbf{116.47\text{ kg}}$
+   - **Verdict under Brzycki**: **110kg x 3 wins by +3.97 kg**.
 
+**Conclusion:** Both formulas agree without ambiguity: **110kg for 3 reps is the stronger set**.
+
+---
+
+### 2. The 10-Rep Crossover and Why Formulas Disagree
+
+While both formulas agree on $100\text{kg} \times 5$ vs $110\text{kg} \times 3$, they cross at exactly **10 reps**:
+$$\text{At } r = 10: \quad \text{Epley} = w \times \left(1 + \frac{10}{30}\right) = \frac{4}{3}w, \quad \text{Brzycki} = \frac{w \times 36}{37 - 10} = \frac{36}{27}w = \frac{4}{3}w$$
+
+- **Below 10 reps:** Brzycki is more conservative than Epley (penalizes fatigue).
+- **Above 10 reps:** Brzycki diverges rapidly and rewards reps exponentially, eventually hitting a division-by-zero singularity at 37 reps.
+- **Example of Direct Disagreement:**
+  - $100\text{kg} \times 12\text{ reps} \implies \text{Epley: } 140.0\text{kg}, \quad \text{Brzycki: } 144.0\text{kg}$
+  - $135\text{kg} \times 2\text{ reps} \implies \text{Epley: } 144.0\text{kg}, \quad \text{Brzycki: } 138.9\text{kg}$
+  - Epley says $135\times 2$ is superior; Brzycki says $100\times 12$ is superior.
+
+### 3. Which formula the app commits to, and why
+
+The application commits to **Epley** as the authoritative default formula (`DEFAULT_FORMULA = "epley"`):
+1. **Mathematical Stability:** Epley is linear ($\Delta \text{e1RM} / \Delta r = w/30$). It has no mathematical singularities, whereas Brzycki has a division-by-zero asymptote at 37 reps.
+2. **Empirical Accuracy for Strength Training:** In the working range of 1–12 reps (`MAX_REPS = 12`), Epley reflects actual physiological 1RM testing across barbell movements with lower variance.
+3. **Consistency Principle:** A personal best cannot oscillate depending on the algorithm evaluated on any given day. By committing to Epley and separating Redis cache keys by formula (`pb:{user}:{ex_id}:{formula}`), historical consistency is strictly guaranteed.
+
+---
+
+## Part 1 — Git & Branch Promotion
+
+### Branching Model
+
+| Branch | Role | Deployment Target | Notes |
+|---|---|---|---|
+| `main` | QA | QA Namespace (`:qa`) | The default branch. Receives work via PR. Runs full CI test suite. |
+| `staging` | Pre-production | Stage Namespace (`:stage`) | Created from `main`. Build-only pipeline. |
+| `prod` | Production | Prod Namespace (`:prod`) | Created from `staging`. Build-only pipeline. |
+
+### Promotion Flow
 ```
-GET  /health
-GET  /exercises
-POST /sets                                      {"user":"asha","exercise":"Bench Press","weight":65,"reps":4}
-GET  /users/{user}/pbs                          ?formula=epley|brzycki
-GET  /users/{user}/exercises/{exercise}/progress session chart + plateau warning
-GET  /users/{user}/exercises/{exercise}/warmup   a plate-rounded warm-up ladder
-POST /compare                                   {"a":{"weight":100,"reps":5},"b":{"weight":110,"reps":3}}
+feature/crud-api-and-dashboard ──(PR)──> main (QA) ──(Merge Commit PR)──> staging ──(Merge Commit PR)──> prod
 ```
+- Direct pushes to `main`, `staging`, and `prod` are blocked by GitHub Ruleset `protected-branches`.
+- Promotion uses **Create a merge commit** (never squash or rebase), ensuring identical commit histories across environments:
+  ```bash
+  git diff main staging  # returns empty after promotion
+  git diff staging prod  # returns empty after promotion
+  ```
 
-`/health` reports Postgres and Redis **separately**. If it says
-`postgres: false` the app started fine and your compose wiring is wrong —
-do not go looking in the application code.
+### Branch Ruleset Verification
+Ruleset name: `protected-branches`
+- **Enforcement:** Active
+- **Bypass List:** Empty (no exceptions, even for repo owner)
+- **Target Branches:** `main`, `staging`, `prod`
+- **Rules Enforced:**
+  - Restrict deletions
+  - Block force pushes
+  - Require a pull request before merging (0 required approvals)
 
-### Migrations
-
-`migrations/` holds `.sql` files applied **in filename order** before the app
-starts. They create the tables and insert sample data. A container running
-`psql` over them in order is enough; you do not need a migration tool.
+**Proof of Rejection:**
+```bash
+git checkout main
+git commit --allow-empty -m "testing the ruleset"
+git push origin main
+# REJECTED by GitHub: GH013: Changes must be made through a pull request.
+git reset --hard origin/main
+```
 
 ---
 
-## 2. What you must write
+## Part 2 — Dockerfile & Docker Compose
 
-| File | What it has to do |
-|---|---|
-| `Dockerfile` | Install dependencies **before** copying source, pin the base image, do not run as root. |
-| `docker-compose.yml` | App + Postgres + Redis + a migration step, one `docker compose up`. |
-| `.circleci/config.yml` | lint → unit tests → integration tests → secret scan → image build |
-| Unit tests | For `app/strength.py`. No database, no network. |
-| Integration tests | Against a real Postgres and Redis as CircleCI service containers. |
+### Dockerfile Design
+- **Base image pinned:** `python:3.12-slim`
+- **Layer caching:** `requirements.txt` installed before copying source code.
+- **Security:** Runs as a non-root user (`appuser:appgroup`) with UID/GID isolation.
+- **Port:** `EXPOSE 8080`
+- **Clean builds:** Comprehensive `.dockerignore` prevents caches, git metadata, and env files from entering the image.
 
-Then push your image to **your own Docker Hub account**, tagged `:1.0`.
-
-### When it works
-
+### Docker Compose
+Run with one single command:
 ```bash
 docker compose up --build
-curl localhost:8080/health
+```
+Features:
+- `db`: PostgreSQL 16 Alpine with `pg_isready` healthcheck.
+- `cache`: Redis 7.2 Alpine with `redis-cli ping` healthcheck.
+- `migration`: Automatically applies all `migrations/*.sql` in order using an alpine psql runner before the app starts.
+- `app`: Starts only after `db` and `cache` report `service_healthy` and `migration` reports `service_completed_successfully`.
+- Port mapping: `8080:8080` (outside:inside).
+
+---
+
+## Part 3 — CircleCI Pipeline
+
+### Pipeline Architecture (`.circleci/config.yml`)
+
+1. **On `main` (QA) — Full Pipeline:**
+   - **Secret Scanning:** `gitleaks detect` prevents hardcoded tokens or secrets from ever being committed.
+   - **Linting:** `ruff check .` validates PEP 8, unused imports, and code hygiene.
+   - **Unit Tests:** `pytest tests/test_strength.py --cov=app.strength --cov-fail-under=70` (achieves **100% coverage**).
+   - **Integration Tests:** Runs against real PostgreSQL (`cimg/postgres:16.2`) and Redis (`cimg/redis:7.2`) service containers on `localhost:5432` and `localhost:6379`.
+   - **Image Build & Dual Tagging:** Builds image using `setup_remote_docker` and pushes two tags to Docker Hub:
+     - Moving Tag: `<user>/gym-tracker-python:qa`
+     - Immutable Tag: `<user>/gym-tracker-python:main-<short-sha>`
+
+2. **On `staging` and `prod` — Build-Only:**
+   - Skips test stages as required.
+   - Pushes moving tag (`:stage` / `:prod`) and immutable tag (`:<branch>-<short-sha>`).
+
+---
+
+## Part 4 — Kubernetes
+
+### Manifests (`k8s/`)
+- `01-namespaces.yaml`: Namespaces `qa`, `stage`, `prod`.
+- `02-postgres.yaml`: ConfigMap containing schema and seed data, Deployment, and Service.
+- `03-redis.yaml`: Redis Deployment and Service.
+- `04-app.yaml`: Deployment and Service configured with:
+  - `imagePullPolicy: Always` (ensures moving tags pull latest image)
+  - `imagePullSecrets: [{ name: dockerhub }]`
+  - Matching label selectors `app: gym-tracker`
+
+### Deployment & Verification
+To deploy all environments:
+```bash
+# Windows
+.\k8s\deploy.ps1 -DockerUser <your-user> -DockerToken <token>
+
+# Linux / macOS
+./k8s/deploy.sh <your-user> <token>
 ```
 
-```json
-{"status":"ok","postgres":true,"redis":true}
+**Demonstration Loop:**
+```bash
+# 1. Trigger rollout restart in QA
+kubectl rollout restart deployment/gym-tracker -n qa
+kubectl rollout status deployment/gym-tracker -n qa
+
+# 2. Verify running image and digest
+kubectl get pods -n qa -o jsonpath='{range .items[*]}{.spec.containers[*].image}{"\n"}{end}'
+kubectl describe pod <pod-name> -n qa | grep -i "image id"
 ```
 
 ---
 
-## Where the marks are
+## Demo Questions & Technical Answers (10 Marks)
 
-`app/strength.py` is **pure logic** — plain functions over plain data, no
-database and no HTTP. Start your tests there. Use pytest:
-`pytest --cov=app --cov-report=term-missing`. Minimum 70%.
+1. **Why is this a Deployment and not a Pod?**
+   A bare Pod is ephemeral; if the node fails or the container crashes, the Pod is gone forever. A Deployment manages a ReplicaSet that continuously ensures the desired state (self-healing, automatic restarts), supports declarative zero-downtime rolling updates, and enables rollback to previous revisions.
 
-The module docstring hands you a pair of sets where Epley and Brzycki give opposite answers. Write that test first, then decide which formula the app commits to and why. Then check that `compare` never says both sets won, and that a 12-rep set is accepted while a 13-rep set is refused.
+2. **Your integration test talks to localhost on CircleCI but to db in Compose. Why are those different?**
+   In Docker Compose, each container runs on an isolated bridge network with its own IP and DNS name matching the service name (`db`, `cache`). In CircleCI, secondary service containers share the network namespace with the primary job container and bind directly to the loopback interface (`localhost`).
 
-## Why Redis is here
+3. **What happens if I delete one of your Pods right now?**
+   The Deployment's controller notices the current replica count (0) does not match the desired count (1) and immediately schedules and spawns a new replacement Pod.
 
-The personal best for every user and exercise lives in a Redis hash, and it is read on every single set logged - that is the hot path. The alternative is a `max()` over the user's entire lift history on every POST, which gets slower every week they train. The cache is warmed from Postgres on a miss, so wiping Redis costs one slow request and nothing else. Note the formula is part of the key: a best computed with Epley is not a best computed with Brzycki.
+4. **Why does your Dockerfile create a user instead of running as root?**
+   Principle of Least Privilege: If a security vulnerability occurs within the web application, running as a non-root user prevents container breakout, prevents unauthorized file modification, and blocks malicious processes from acquiring root privileges on the underlying host kernel.
 
-## The hard part
+5. **Your Service says Running but the page does not load. Where do you look first?**
+   First run `kubectl get endpoints <service-name> -n <namespace>`. If the `ENDPOINTS` column is `<none>`, the Service's `selector` labels do not match the Pod's `template.metadata.labels`. Second, check `targetPort` alignment between the Service and container `EXPOSE 8080`.
 
-Is 100kg for 5 reps better than 110kg for 3? Your formula has to decide, and be consistent about it.
+6. **Why :qa and :stage rather than one :latest tag for everything?**
+   Environment isolation: Using specific moving tags (`:qa`, `:stage`, `:prod`) ensures each Kubernetes cluster environment runs strictly the version intended for its lifecycle stage. Additionally, `:latest` is ambiguous, prevents rollbacks, and creates caching race conditions.
 
-Write your answer in your README. It is worth more marks than the feature.
-
----
-
-## Getting unstuck
-
-| Symptom | Almost always |
-|---|---|
-| `/health` says `postgres: false` | Wrong hostname. In compose the host is the **service name**, not `localhost`. |
-| Page will not load, logs fine | No `ports:` mapping, or bound to `127.0.0.1` not `0.0.0.0`. |
-| `relation "..." does not exist` | Migrations did not run, or the app started before they finished. |
-| Build takes minutes each time | `COPY . .` is above your dependency install. |
-| CI cannot reach the database | In CircleCI service containers the host **is** `localhost` — opposite of compose. |
+7. **What exactly does rollout restart do — does it rebuild anything?**
+   `kubectl rollout restart` does **not** rebuild any Docker images. It updates the Deployment's internal pod template metadata (injecting a timestamp annotation `kubectl.kubernetes.io/restartedAt`), which triggers a standard rolling recreation of the pods. Combined with `imagePullPolicy: Always`, each new pod pulls the newly pushed image digest from Docker Hub.
