@@ -39,15 +39,15 @@ services:
       PGPASSWORD: postgres
     volumes:
       - ./migrations:/migrations:ro
-    entrypoint: /bin/sh
-    command: >
-      -c "
-      for f in /migrations/*.sql; do
-        echo Applying migration $$f...;
-        psql -h db -U postgres -d gym -f \"$$f\";
-      done
-      echo Migrations applied successfully!
-      "
+    command:
+      - sh
+      - -c
+      - |
+        for f in /migrations/*.sql; do
+          echo "Applying $$f..."
+          psql -h db -U postgres -d gym -f "$$f"
+        done
+        echo "Migrations applied successfully"
 
   app:
     build:
