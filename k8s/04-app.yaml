@@ -1,0 +1,176 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gym-tracker
+  namespace: qa
+  labels:
+    app: gym-tracker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gym-tracker
+  template:
+    metadata:
+      labels:
+        app: gym-tracker
+    spec:
+      imagePullSecrets:
+        - name: dockerhub
+      containers:
+        - name: app
+          image: divishabafna11-88/gym-tracker-python:qa
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://postgres:postgres@postgres:5432/gym"
+            - name: REDIS_URL
+              value: "redis://redis:6379/0"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gym-tracker
+  namespace: qa
+  labels:
+    app: gym-tracker
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: gym-tracker
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gym-tracker
+  namespace: stage
+  labels:
+    app: gym-tracker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gym-tracker
+  template:
+    metadata:
+      labels:
+        app: gym-tracker
+    spec:
+      imagePullSecrets:
+        - name: dockerhub
+      containers:
+        - name: app
+          image: divishabafna11-88/gym-tracker-python:stage
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://postgres:postgres@postgres:5432/gym"
+            - name: REDIS_URL
+              value: "redis://redis:6379/0"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gym-tracker
+  namespace: stage
+  labels:
+    app: gym-tracker
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: gym-tracker
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gym-tracker
+  namespace: prod
+  labels:
+    app: gym-tracker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gym-tracker
+  template:
+    metadata:
+      labels:
+        app: gym-tracker
+    spec:
+      imagePullSecrets:
+        - name: dockerhub
+      containers:
+        - name: app
+          image: divishabafna11-88/gym-tracker-python:prod
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://postgres:postgres@postgres:5432/gym"
+            - name: REDIS_URL
+              value: "redis://redis:6379/0"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gym-tracker
+  namespace: prod
+  labels:
+    app: gym-tracker
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: gym-tracker
