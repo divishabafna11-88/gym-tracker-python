@@ -42,6 +42,7 @@ jobs:
       - run:
           name: Run Unit Tests with Coverage
           command: |
+            export PYTHONPATH=.
             pytest tests/test_strength.py --cov=app.strength --cov-report=term-missing --cov-fail-under=70
 
   integration-tests:
@@ -73,6 +74,7 @@ jobs:
       - run:
           name: Run Integration Tests
           command: |
+            export PYTHONPATH=.
             pytest tests/test_integration.py
 
   build-and-push:
